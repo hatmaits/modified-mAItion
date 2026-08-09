@@ -13,9 +13,10 @@ keywords:
 mAItion is an all-in-one, ready-to-use AI platform that combines your existing knowledge
 with large language models (LLMs).
 
-The default deployment is local-first: Docker Compose runs Ollama with `qwen3:4b`,
-indexes files from `./data/input`, and uses a local embedding model. No hosted LLM
-API key or S3 bucket is required to get started.
+The default deployment connects to external Ollama at
+`http://100.85.191.78:11434`, uses its installed `qwen2.5:14b` model, indexes files
+from `./data/input`, and uses a local embedding model. No hosted LLM API key or S3
+bucket is required to get started.
 
 It gives you a single chat interface to:
 

@@ -10,7 +10,7 @@ diff --git a/utils/config.py b/utils/config.py
 +    OPENROUTER_API_KEY: str = ""
 +    OPENROUTER_API_BASE: str = "https://openrouter.ai/api/v1"
 +    OLLAMA_API_KEY: str = "ollama"
-+    OLLAMA_API_BASE: str = "http://ollama:11434/v1"
++    OLLAMA_BASE_URL: str = "http://100.85.191.78:11434"
      API_KEY: str = ""
      MCP_ENABLE: bool = False
      MCP_API_KEY: str = ""
@@ -29,11 +29,11 @@ diff --git a/utils/config.py b/utils/config.py
  
 +    @property
 +    def OLLAMA(self):
-+        base_url = self.env.OLLAMA_API_BASE.rstrip("/")
++        base_url = self.env.OLLAMA_BASE_URL.rstrip("/")
 +        if not base_url.endswith("/v1"):
 +            base_url = f"{base_url}/v1"
 +        return {
-+            # Ollama ignores this local compatibility key, while the OpenAI
++            # Ollama ignores this compatibility key, while the OpenAI
 +            # client requires a non-empty value.
 +            "api_key": self.env.OLLAMA_API_KEY.strip() or "ollama",
 +            "base_url": base_url,

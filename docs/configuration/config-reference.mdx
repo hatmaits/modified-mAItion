@@ -84,11 +84,13 @@ inference:
 ```
 
 - `provider`: inference backend; `ollama` is the default
-- `model_config`: chat/rephrase model ID (`qwen3:4b` in the example environment)
+- `model_config`: chat/rephrase model ID (`qwen2.5:14b` in the example environment)
 
-For Ollama, the backend reads `OLLAMA_API_BASE=http://ollama:11434/v1` and
-`OLLAMA_API_KEY=ollama` from `.env.rag`. The key is a compatibility placeholder.
-The `/v1` path is required by the backend's OpenAI-compatible client.
+For Ollama, set the shared root URL to
+`OLLAMA_BASE_URL=http://100.85.191.78:11434` in `.env`. Do not add `/v1`:
+Compose supplies the root URL to both OpenWebUI and the backend, and ROAT appends
+`/v1` internally for its OpenAI-compatible client. The selected model must already
+exist on the external Ollama server.
 
 To opt into OpenRouter or another OpenAI-compatible endpoint, change `provider`
 to `openrouter` or `openai` and configure `OPENROUTER_API_BASE` and

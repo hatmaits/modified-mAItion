@@ -11,7 +11,7 @@ interact with your knowledge with ease!
 
 ## ✨ Features
 
-* Local-first setup with Compose-managed Ollama and `qwen3:4b` as the default chat and inference model
+* External Ollama at `http://100.85.191.78:11434`, with the installed `qwen2.5:14b` model as the default for chat and inference
 * Support for local and remote models for embeddings and inference, including Ollama, OpenRouter, and OpenAI-compatible APIs
 * Asynchronous data ingestion with deduplication and per-source configurable schedules
 * Data ingestion from a local directory by default, with optional S3 bucket ingestion and Everything-to-Markdown conversion via [MarkItDown](https://github.com/microsoft/markitdown)
@@ -74,7 +74,9 @@ Over 100 extra connectors are available at request, including the most popular o
 ### Requirements
 
 * Docker and Docker Compose
-* An internet connection on first start to download the container images, `qwen3:4b`, and the local HuggingFace embedding model
+* An Ollama server reachable from the Docker host and containers at `http://100.85.191.78:11434`
+* `qwen2.5:14b` already installed on that Ollama server
+* An internet connection on first start to download the container images and local HuggingFace embedding model
 
 An OpenRouter/OpenAI API key and an S3 bucket are no longer required for the default setup.
 
@@ -93,21 +95,28 @@ The copied files are ready to use without cloud credentials. Their defaults are:
 * `./data/input` on the host is mounted read-only at `/data/input` in the ingestion worker.
 * The Directory connector recursively ingests `/data/input` once per hour.
 * `sentence-transformers/all-mpnet-base-v2` runs locally for embeddings.
-* The Compose stack runs `ollama/ollama:0.32.5` and supplies `qwen3:4b` to both the RAG rephrase endpoint and OpenWebUI chat.
+* OpenWebUI and the RAG backend connect to the external Ollama server at `http://100.85.191.78:11434`.
+* `qwen2.5:14b`, selected from the server's installed models, is used for both the RAG rephrase endpoint and OpenWebUI chat.
 
 Place documents in `./data/input`, then build and start the stack:
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build --remove-orphans
 ```
 
-On first start, the one-shot `ollama-init` service downloads the configured model before the API and OpenWebUI start. This can take several minutes. Check all service states with:
+`--remove-orphans` removes any old `ollama` and `ollama-init` containers left by
+an earlier local-Ollama deployment. Its old `ollama_data` volume is harmless and
+is not removed automatically.
+
+Check the service states with:
 
 ```bash
 docker compose ps -a
 ```
 
-`ollama-init` should show `Exited (0)` after the download, and the long-running services should become healthy.
+The long-running services should become healthy. If the API or OpenWebUI cannot reach
+Ollama, verify the external server is listening on a network-accessible interface and
+allows connections from the Docker host.
 
 Once all the services are booted and report healthy status visit http://localhost:3000 and
 login using Admin credentials. The credentials are defined in `X_WEBUI_ADMIN_EMAIL` and `X_WEBUI_ADMIN_PASS`
@@ -116,7 +125,8 @@ of the `.env` file. The default ones are:
 * username: `admin@example123.com`
 * password: `q1w2e3r4!`
 
-On a new installation, OpenWebUI automatically configures its Ollama connection and selects `qwen3:4b` as the global default chat model. Ollama is reachable by the other containers at `http://ollama:11434`; it is not published directly to the host.
+On a new installation, OpenWebUI automatically configures the external Ollama connection at
+`http://100.85.191.78:11434` and selects `qwen2.5:14b` as the global default chat model.
 OpenWebUI binds to `127.0.0.1` by default. Change the bootstrap credentials and
 `WEBUI_SECRET_KEY` before setting `WEBUI_BIND_HOST=0.0.0.0` for trusted-network access.
 
@@ -491,7 +501,7 @@ full configuration reference, and common gotchas, see the
 The RAG backend supports:
 
 * `local` — HuggingFace embeddings running in the RAG containers (default)
-* `ollama` — an embedding model served by the Compose-managed Ollama instance
+* `ollama` — an embedding model served by the configured external Ollama server
 * `openrouter`
 * `openai` or another OpenAI-compatible endpoint
 
@@ -499,14 +509,14 @@ The RAG backend supports:
 
 The RAG rephrase endpoint supports:
 
-* `ollama` — local inference through Ollama's OpenAI-compatible `/v1` API (default)
+* `ollama` — inference through the external Ollama server's OpenAI-compatible `/v1` API (default)
 * `openrouter`
 * `openai` or another OpenAI-compatible endpoint
 
 The locally built derived ROAT image adds `provider: ollama` support to the pinned
 Rag-Of-All-Trades backend. It has no registry image name, so Compose always builds it from
-`Dockerfile.roat`. OpenWebUI connects to Ollama's native base URL, while the RAG backend uses its
-OpenAI-compatible base URL.
+`Dockerfile.roat`. OpenWebUI and the RAG backend receive the same native root URL in
+`OLLAMA_BASE_URL`; ROAT appends `/v1` internally for its OpenAI-compatible client.
 
 ### Default: local HuggingFace embeddings and Ollama inference
 
@@ -524,20 +534,17 @@ inference:
 ```
 
 ```dotenv
-# .env (OpenWebUI and Compose model pull)
+# .env (shared Ollama connection and model)
 ENABLE_OLLAMA_API=True
-OLLAMA_BASE_URL=http://ollama:11434
-OLLAMA_DEFAULT_MODEL=qwen3:4b
-OLLAMA_CONTEXT_LENGTH=8192
-
-# .env.rag (RAG inference)
-OLLAMA_API_KEY=ollama
-OLLAMA_API_BASE=http://ollama:11434/v1
+OLLAMA_BASE_URL=http://100.85.191.78:11434
+OLLAMA_DEFAULT_MODEL=qwen2.5:14b
 ```
 
-`OLLAMA_API_KEY` is a non-empty compatibility placeholder required by the OpenAI client; Ollama ignores it.
-To choose another chat/inference model, set `OLLAMA_DEFAULT_MODEL` in `.env`, then run
-`docker compose up -d`. Compose supplies that value to the RAG services and the `ollama-init` service pulls it.
+Keep `OLLAMA_BASE_URL` at the Ollama root URL without `/v1`. Compose supplies this
+single value to OpenWebUI and ROAT, and ROAT appends `/v1` internally. The default
+model is not downloaded by this stack; `qwen2.5:14b` must already exist on the external
+server. To use another model, install it on that server first, set
+`OLLAMA_DEFAULT_MODEL` in `.env`, and then run `docker compose up -d`.
 
 ### Embeddings-only HuggingFace local model
 
@@ -561,11 +568,12 @@ inference:
 
 ### Ollama embeddings (optional)
 
-Ollama can also provide embeddings. Pull a compatible embedding model, then select it and use the dimension
-published for that model:
+Ollama can also provide embeddings. Install a compatible embedding model on the
+external server, then select it and use the dimension published for that model. For
+example, run this on the Ollama host:
 
 ```bash
-docker compose exec ollama ollama pull nomic-embed-text
+ollama pull nomic-embed-text
 ```
 
 ```yaml
@@ -643,7 +651,7 @@ embedding:
 # configures the LLM provider and model
 inference:
   provider: ollama # `ollama` (default), `openrouter`, `openai`, or null
-  model_config: "${OLLAMA_DEFAULT_MODEL}" # defaults to qwen3:4b
+  model_config: "${OLLAMA_DEFAULT_MODEL}" # defaults to qwen2.5:14b
 
 # vector store configuration
 vector_store:
@@ -662,42 +670,44 @@ vector_store:
 ## Tech Stack
 
 * A derived [Rag-Of-All-Trades](https://github.com/wikiteq/rag-of-all-trades) image with Ollama `/v1` provider compatibility as the RAG backend
-* [Ollama](https://ollama.com/) v0.32.5 for local inference
+* An external [Ollama](https://ollama.com/) server for inference
 * [OpenWebUI](https://github.com/open-webui/open-webui) v0.6.5 as a front-end
 
 ## Troubleshooting
 
 ### OpenWebUI does not start
 
-The `openwebui` service waits for both a healthy `api` service and successful completion of `ollama-init`.
-Inspect all states and the relevant logs:
+Inspect the service states and relevant logs:
 
 ```bash
 docker compose ps -a
-docker compose logs --tail=200 ollama ollama-init api openwebui
+docker compose logs --tail=200 api openwebui
 ```
 
 Also review `config.yaml`, `.env.rag`, and `.env` for typos or mismatched model names.
 
-### Ollama model download fails
+### Ollama is unreachable or the model is missing
 
-`ollama-init` must download the selected model before the API and UI start. Check that Ollama is healthy and
-that the model name is available, then retry the one-shot service:
+The Compose stack does not run Ollama or download models. From the Docker host,
+verify that the external API is reachable and that `qwen2.5:14b` is installed:
 
 ```bash
-docker compose exec ollama ollama list
-docker compose logs --tail=200 ollama-init
-docker compose up ollama-init
+curl http://100.85.191.78:11434/api/tags
 ```
 
-Downloaded models are retained in the `ollama_data` volume.
+If the model is absent, ask the external Ollama administrator to install it or
+another model and update `OLLAMA_DEFAULT_MODEL`. Also ensure Ollama listens on an
+interface reachable from the Docker host and that any firewall permits TCP port
+`11434`.
 
 ### A changed Ollama model is not selected
 
-Set `OLLAMA_DEFAULT_MODEL` in `.env`, then run `docker compose up -d`. Compose uses that single value for the
-model pull, OpenWebUI default, and RAG inference.
+Install the model on the external Ollama server, set `OLLAMA_DEFAULT_MODEL` in
+`.env`, then run `docker compose up -d`. Compose uses that value for the OpenWebUI
+default and RAG inference; it does not pull the model.
 OpenWebUI provider settings are provisioned on its first boot and persisted, so an existing installation may
-also need its Ollama connection/default model updated in the Admin Panel.
+also need its Ollama connection updated to `http://100.85.191.78:11434` and its
+default model updated in the Admin Panel.
 
 ### Directory documents are not ingested
 
@@ -719,7 +729,7 @@ requests.exceptions.ReadTimeout: (ReadTimeoutError("HTTPSConnectionPool(host='hu
 ```
 
 The default local embedding model is downloaded from HuggingFace during the first boot. If HuggingFace times
-out, verify network access and retry the affected services without deleting the database or Ollama volumes:
+out, verify network access and retry the affected services without deleting the database volume:
 
 ```bash
 docker compose restart api celery_worker

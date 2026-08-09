@@ -22,13 +22,14 @@ Reference value for `.env.rag` file.
 
 ## Ollama Provider (Default)
 
-- `OLLAMA_API_KEY`: required client placeholder (default: `ollama`; ignored by local Ollama)
-- `OLLAMA_API_BASE`: backend inference URL (default: `http://ollama:11434/v1`)
-- `OLLAMA_DEFAULT_MODEL`: backend rephrase model injected by Compose from the root `.env` file (default: `qwen3:4b`)
+- `OLLAMA_API_KEY`: client compatibility placeholder (default: `ollama`; ignored by Ollama when authentication is not configured)
+- `OLLAMA_BASE_URL`: shared external Ollama root URL injected by Compose from the root `.env` file (default: `http://100.85.191.78:11434`)
+- `OLLAMA_DEFAULT_MODEL`: backend rephrase model injected by Compose from the root `.env` file (default: `qwen2.5:14b`)
 
-The backend uses an OpenAI-compatible client, so `OLLAMA_API_BASE` must include
-`/v1`. Set `OLLAMA_DEFAULT_MODEL` once in the root `.env`; Compose injects it into
-the backend and also uses it for the model pull and OpenWebUI default.
+Set `OLLAMA_BASE_URL` once in the root `.env` and keep it free of a `/v1` suffix.
+Compose injects the same root URL into the backend and OpenWebUI; ROAT appends
+`/v1` internally for its OpenAI-compatible client. Set `OLLAMA_DEFAULT_MODEL` in
+that same file. The selected model must already exist on the external server.
 
 ## OpenAI-Compatible Provider (Optional)
 
@@ -79,7 +80,8 @@ The corresponding host path is `DIRECTORY_HOST_PATH` in `.env` and defaults to
 
 ```dotenv
 OLLAMA_API_KEY=ollama
-OLLAMA_API_BASE=http://ollama:11434/v1
+# OLLAMA_BASE_URL=http://100.85.191.78:11434 is supplied from the root .env
+# OLLAMA_DEFAULT_MODEL=qwen2.5:14b is supplied from the root .env
 
 OPENROUTER_API_KEY=
 OPENROUTER_API_BASE=https://openrouter.ai/api/v1

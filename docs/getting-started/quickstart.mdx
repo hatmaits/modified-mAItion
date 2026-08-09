@@ -8,14 +8,17 @@ keywords:
   - docker
 ---
 
-This quick start launches a fully local mAItion stack. Docker Compose runs Ollama,
-downloads `qwen3:4b`, and configures it as the default model for both OpenWebUI and
-the RAG backend. Files in `./data/input` are the default knowledge source.
+This quick start launches mAItion with an external Ollama server at
+`http://100.85.191.78:11434`. It configures the already-installed `qwen2.5:14b`
+model as the default for OpenWebUI and the RAG backend. Files in `./data/input`
+are the default knowledge source.
 
 ## Requirements
 
 - Docker with Docker Compose
-- Internet access during the first start to download images and `qwen3:4b`
+- Network access from the Docker host and containers to `http://100.85.191.78:11434`
+- `qwen2.5:14b` installed on that external Ollama server
+- Internet access during the first start to download container images and the local embedding model
 - One or more documents to index
 
 No OpenAI or OpenRouter API key is required for the default setup.
@@ -34,12 +37,13 @@ The examples are ready to run with these defaults:
 
 - Directory source: host `./data/input`, mounted read-only at `/data/input`
 - Local embeddings: `sentence-transformers/all-mpnet-base-v2`
-- Backend inference: Ollama through `http://ollama:11434/v1`
-- OpenWebUI chat: native Ollama through `http://ollama:11434`
-- Default chat and rephrase model: `qwen3:4b`
+- Shared Ollama root URL: `http://100.85.191.78:11434`
+- Backend inference: ROAT appends `/v1` internally for its OpenAI-compatible client
+- OpenWebUI chat: native Ollama through the same root URL
+- Default chat and rephrase model: `qwen2.5:14b`, selected from the models installed on the remote server
 
-The local Ollama API key in `.env.rag` is only a compatibility placeholder; Ollama
-does not use it for authentication inside the Compose network.
+Keep `OLLAMA_BASE_URL` as the root URL without `/v1`. Compose supplies that one
+value to both OpenWebUI and ROAT.
 
 ## 2. Add Documents
 
@@ -55,11 +59,15 @@ mount target in `compose.yaml`.
 Run:
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build --remove-orphans
 ```
 
 The ROAT services are built locally from `Dockerfile.roat`; no Docker registry
 login is required for a `modified-maition-roat` image.
+
+When upgrading from the local-Ollama stack, `--remove-orphans` removes the old
+`ollama` and `ollama-init` containers. The old `ollama_data` volume remains but is
+harmless unless you explicitly choose to remove it.
 
 Wait for all services to become healthy:
 
@@ -67,12 +75,19 @@ Wait for all services to become healthy:
 docker compose ps
 ```
 
-The first start can take several minutes because `ollama-init` downloads
-`qwen3:4b` before the API and OpenWebUI start. Confirm the model is available:
+The stack does not start an Ollama container or download models. Confirm the
+external API is reachable and `qwen2.5:14b` appears in the installed-model list:
 
 ```bash
-docker compose exec ollama ollama list
+curl http://100.85.191.78:11434/api/tags
 ```
+
+To use a different model, an administrator must install it on the external Ollama
+server before you set `OLLAMA_DEFAULT_MODEL` in `.env`.
+
+OpenWebUI stores provider settings in its persistent volume. For an existing
+installation, update its Ollama URL to `http://100.85.191.78:11434` and select
+`qwen2.5:14b` in the Admin Panel if the previous local URL remains.
 
 ## 4. Log In
 

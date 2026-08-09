@@ -42,12 +42,13 @@ works. After first boot, you can disable it to run in single-user or private mod
 ## Ollama Provider (Default)
 
 - `ENABLE_OLLAMA_API`: configure OpenWebUI's native Ollama provider (default: `True`)
-- `OLLAMA_BASE_URL`: native Ollama root URL (default: `http://ollama:11434`)
-- `OLLAMA_DEFAULT_MODEL`: model pulled at startup and selected in OpenWebUI (default: `qwen3:4b`)
-- `OLLAMA_CONTEXT_LENGTH`: context window configured on the Compose-managed Ollama service (default: `8192`)
+- `OLLAMA_BASE_URL`: shared external Ollama root URL (default: `http://100.85.191.78:11434`)
+- `OLLAMA_DEFAULT_MODEL`: installed model selected in OpenWebUI and ROAT (default: `qwen2.5:14b`)
 
-Do not append `/v1` to `OLLAMA_BASE_URL`. OpenWebUI uses Ollama's native API.
-The RAG backend has a separate `/v1` URL in `.env.rag`.
+Do not append `/v1` to `OLLAMA_BASE_URL`. OpenWebUI uses Ollama's native API,
+while Compose passes the same root URL to ROAT and ROAT appends `/v1` internally.
+The Compose stack does not install models; `qwen2.5:14b` must already exist on the
+external server.
 
 ## OpenAI-Compatible Provider (Optional)
 
@@ -89,9 +90,8 @@ ENABLE_SIGNUP=True
 ENABLE_LOGIN_FORM=True
 
 ENABLE_OLLAMA_API=True
-OLLAMA_BASE_URL=http://ollama:11434
-OLLAMA_DEFAULT_MODEL=qwen3:4b
-OLLAMA_CONTEXT_LENGTH=8192
+OLLAMA_BASE_URL=http://100.85.191.78:11434
+OLLAMA_DEFAULT_MODEL=qwen2.5:14b
 
 ENABLE_OPENAI_API=False
 OPENAI_API_BASE_URL=https://openrouter.ai/api/v1

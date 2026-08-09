@@ -2,7 +2,7 @@
     {
         "id": "wikiteqcenturion",
         "user_id": "",
-        "base_model_id": "qwen3:4b",
+        "base_model_id": "qwen2.5:14b",
         "name": "wikiteq/centurion",
         "params":
         {
