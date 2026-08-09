@@ -11,9 +11,10 @@ interact with your knowledge with ease!
 
 ## ✨ Features
 
-* Support for both local and remote LLMs for embedding and inference
+* Local-first setup with Compose-managed Ollama and `qwen3:4b` as the default chat and inference model
+* Support for local and remote models for embeddings and inference, including Ollama, OpenRouter, and OpenAI-compatible APIs
 * Asynchronous data ingestion with deduplication and per-source configurable schedules
-* Data ingestion from S3 buckets with Everything-to-Markdown conversion via [MarkItDown](https://github.com/microsoft/markitdown)
+* Data ingestion from a local directory by default, with optional S3 bucket ingestion and Everything-to-Markdown conversion via [MarkItDown](https://github.com/microsoft/markitdown)
 * Data ingestion from MediaWiki with Wiki-to-Markdown conversion via [html2text](https://github.com/Alir3z4/html2text)
 * SerpAPI search query results ingestion from Google Search results with customizable queries
 * Flexible configuration supporting an arbitrary number of connectors
@@ -37,10 +38,15 @@ interact with your knowledge with ease!
 
 ## 🌐 Connectors included
 
-* S3 (any AWS compatible Object Storage including AWS, Contabo, B2, Cloudflare R2, OVH, etc)
+* Directory (default; a host directory mounted read-only into the ingestion worker)
+* S3 (optional; any AWS-compatible Object Storage including AWS, Contabo, B2, Cloudflare R2, OVH, etc.)
 * MediaWiki (all versions supported, both private and public wiki)
 * SerpAPI
+* Web
+* Jira
+* Pipedrive
 * Slack
+* IMAP
 
 ## 🌐 Extra connectors
 
@@ -68,38 +74,40 @@ Over 100 extra connectors are available at request, including the most popular o
 ### Requirements
 
 * Docker and Docker Compose
-* OpenRouter or OpenAI API key (a free OpenRouter account works with the default configuration)
-* S3 bucket
+* An internet connection on first start to download the container images, `qwen3:4b`, and the local HuggingFace embedding model
+
+An OpenRouter/OpenAI API key and an S3 bucket are no longer required for the default setup.
 
 ### Setup
 
-* Create `.env.rag` file by copying `.env.rag.example` (see https://github.com/wikiteq/rag-of-all-trades for details)
-    * Set `OPENROUTER_API_KEY`
-    * Set `S3_ACCOUNT1_*` values to match your source S3 bucket with files
-* Create `config.yaml` out of `config.yaml.example`
-    * The default config works OK and is configured to:
-        * Use a single S3 bucket as data source
-        * Use `openai/gpt-oss-20b:free` [model](https://openrouter.ai/openai/gpt-oss-20b:free) for rephrase
-        * Use local `sentence-transformers/all-mpnet-base-v2` [model](https://huggingface.co/sentence-transformers/all-mpnet-base-v2) for embeddings
-        * You can change the values if necessary, refer to https://github.com/wikiteq/rag-of-all-trades for details
-* Create `.env` file by copying `.env.openwebui.example`
-    * Set `OPENAI_API_KEY`
-    * Optionally set `OPENAI_DEFAULT_MODEL`
-
-Start the stack by running `docker compose up -d`. Wait until all the services
-become healthy. You can check health status by running `docker compose ps` and checking
-the `STATUS` column of the services:
+Copy the example configuration files:
 
 ```bash
-docker compose ps
-NAME                                      IMAGE                                      COMMAND                  SERVICE     CREATED         STATUS                   PORTS
-rag-of-all-trades-openwebui-api-1         ghcr.io/wikiteq/rag-of-all-trades:latest   "sh -c 'alembic upgr…"   api         4 minutes ago   Up 4 minutes (healthy)   8000/tcp
-rag-of-all-trades-openwebui-openwebui-1   ghcr.io/open-webui/open-webui:0.6.5        "/custom-entrypoint.…"   openwebui   4 minutes ago   Up 4 minutes (healthy)   0.0.0.0:3000->8080/tcp, [::]:3000->8080/tcp
-rag-of-all-trades-openwebui-postgres-1    ankane/pgvector:v0.5.1                     "docker-entrypoint.s…"   postgres    4 minutes ago   Up 4 minutes (healthy)   5432/tcp
-rag-of-all-trades-openwebui-redis-1       redis:7                                    "docker-entrypoint.s…"   redis       4 minutes ago   Up 4 minutes (healthy)   6379/tcp
+cp .env.rag.example .env.rag
+cp .env.openwebui.example .env
+cp config.yaml.example config.yaml
 ```
 
-It takes up to a minute for the OpenWebUI to fully boot on cold start.
+The copied files are ready to use without cloud credentials. Their defaults are:
+
+* `./data/input` on the host is mounted read-only at `/data/input` in the ingestion worker.
+* The Directory connector recursively ingests `/data/input` once per hour.
+* `sentence-transformers/all-mpnet-base-v2` runs locally for embeddings.
+* The Compose stack runs `ollama/ollama:0.32.5` and supplies `qwen3:4b` to both the RAG rephrase endpoint and OpenWebUI chat.
+
+Place documents in `./data/input`, then build and start the stack:
+
+```bash
+docker compose up -d --build
+```
+
+On first start, the one-shot `ollama-init` service downloads the configured model before the API and OpenWebUI start. This can take several minutes. Check all service states with:
+
+```bash
+docker compose ps -a
+```
+
+`ollama-init` should show `Exited (0)` after the download, and the long-running services should become healthy.
 
 Once all the services are booted and report healthy status visit http://localhost:3000 and
 login using Admin credentials. The credentials are defined in `X_WEBUI_ADMIN_EMAIL` and `X_WEBUI_ADMIN_PASS`
@@ -108,8 +116,9 @@ of the `.env` file. The default ones are:
 * username: `admin@example123.com`
 * password: `q1w2e3r4!`
 
-If you did not change the `ENABLE_OPENAI_API` you will also have LLM provider
-pre-configured with the values you have in the `.env` including the default chat model
+On a new installation, OpenWebUI automatically configures its Ollama connection and selects `qwen3:4b` as the global default chat model. Ollama is reachable by the other containers at `http://ollama:11434`; it is not published directly to the host.
+OpenWebUI binds to `127.0.0.1` by default. Change the bootstrap credentials and
+`WEBUI_SECRET_KEY` before setting `WEBUI_BIND_HOST=0.0.0.0` for trusted-network access.
 
 Two components handle RAG service communication:
 
@@ -120,10 +129,41 @@ Two components handle RAG service communication:
 ## Connectors configuration
 
 The service supports multiple data sources, including multiple data sources of the same type, each with its own
-ingestion schedule. The connectors to enable are defined via `config.yaml`, and their secrets are defined
-in the `.env.rag` file.
+ingestion schedule. Connectors are enabled in `config.yaml`; connector runtime values and secrets are normally
+defined in `.env.rag`. The host path mounted for the Directory connector is defined in `.env`.
 
-### S3 Connector
+### Directory Connector (default)
+
+The Directory connector ingests files from a local host directory. By default, Compose mounts `./data/input`
+read-only into the ingestion worker at `/data/input`, and the connector scans that container path recursively.
+
+```yaml
+# config.yaml
+
+sources:
+  - type: "directory"
+    name: "local_docs"
+    config:
+      path: "${DIRECTORY1_PATH}"
+      recursive: true
+      exclude_hidden: true
+      exclude_empty: false
+      schedules: "${DIRECTORY1_SCHEDULES}"
+```
+
+```dotenv
+# .env (host-to-container mount)
+DIRECTORY_HOST_PATH=./data/input
+
+# .env.rag (path visible inside the ingestion worker)
+DIRECTORY1_PATH=/data/input
+DIRECTORY1_SCHEDULES=3600
+```
+
+Change `DIRECTORY_HOST_PATH` to ingest another host directory. Keep `DIRECTORY1_PATH=/data/input` unless you
+also change the container mount target in `compose.yaml`.
+
+### S3 Connector (optional)
 
 The S3 connector ingests documents from S3 buckets and converts them to Markdown format.
 The connector has the following configuration options:
@@ -448,18 +488,56 @@ full configuration reference, and common gotchas, see the
 
 ### Embeddings support
 
-Both local and remote OpenAI-compatible models are supported for embeddings:
+The RAG backend supports:
 
-* `Local` (running arbitrary embedding models from HuggingFace)
-* `OpenRouter`
-* `OpenAI` or `OpenAI`-compatible
+* `local` — HuggingFace embeddings running in the RAG containers (default)
+* `ollama` — an embedding model served by the Compose-managed Ollama instance
+* `openrouter`
+* `openai` or another OpenAI-compatible endpoint
 
 ### Inference support
 
-Both local and remote OpenAI-compatible models are supported for inference:
+The RAG rephrase endpoint supports:
 
-* `OpenRouter`
-* `OpenAI` or `OpenAI`-compatible
+* `ollama` — local inference through Ollama's OpenAI-compatible `/v1` API (default)
+* `openrouter`
+* `openai` or another OpenAI-compatible endpoint
+
+The locally built derived ROAT image adds `provider: ollama` support to the pinned
+Rag-Of-All-Trades backend. It has no registry image name, so Compose always builds it from
+`Dockerfile.roat`. OpenWebUI connects to Ollama's native base URL, while the RAG backend uses its
+OpenAI-compatible base URL.
+
+### Default: local HuggingFace embeddings and Ollama inference
+
+```yaml
+# config.yaml
+
+embedding:
+  provider: local
+  model_config: sentence-transformers/all-mpnet-base-v2
+  embedding_dim: 768
+
+inference:
+  provider: ollama
+  model_config: "${OLLAMA_DEFAULT_MODEL}"
+```
+
+```dotenv
+# .env (OpenWebUI and Compose model pull)
+ENABLE_OLLAMA_API=True
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_DEFAULT_MODEL=qwen3:4b
+OLLAMA_CONTEXT_LENGTH=8192
+
+# .env.rag (RAG inference)
+OLLAMA_API_KEY=ollama
+OLLAMA_API_BASE=http://ollama:11434/v1
+```
+
+`OLLAMA_API_KEY` is a non-empty compatibility placeholder required by the OpenAI client; Ollama ignores it.
+To choose another chat/inference model, set `OLLAMA_DEFAULT_MODEL` in `.env`, then run
+`docker compose up -d`. Compose supplies that value to the RAG services and the `ollama-init` service pulls it.
 
 ### Embeddings-only HuggingFace local model
 
@@ -477,50 +555,65 @@ embedding:
   embedding_dim: 384
 
 inference:
-  provider: None
-  model_config: None
+  provider: null
+  model_config: null
 ```
 
-### Embeddings-only OpenRouter/OpenAI model
+### Ollama embeddings (optional)
 
-You can configure the service to use **remote embeddings**, in this mode
-you can use any embedding model supported by OpenRouter/OpenAI. Inference is disabled in
-this mode, so you won't be able to use the **rephrase** endpoint.
+Ollama can also provide embeddings. Pull a compatible embedding model, then select it and use the dimension
+published for that model:
+
+```bash
+docker compose exec ollama ollama pull nomic-embed-text
+```
 
 ```yaml
 # config.yaml
 
 embedding:
-  provider: openrouter
-  model_config: text-embedding-3-small
-  embedding_dim: 1536
+  provider: ollama
+  model_config: nomic-embed-text
+  embedding_dim: 768
 
 inference:
-  provider: None
-  model_config: None
+  provider: ollama
+  model_config: "${OLLAMA_DEFAULT_MODEL}"
 ```
 
-You must set `OPENROUTER_API_KEY` and `OPENROUTER_API_BASE` in the `.env.rag` file.
+Changing embedding models or dimensions for an existing vector table requires re-indexing the source data.
 
-### Embeddings and inference OpenRouter/OpenAI model
+### OpenRouter/OpenAI-compatible providers (optional)
 
-You can configure the service to use **remote embeddings** and **remote inference**, in this mode
-you can use any embedding and inference models supported by OpenRouter/OpenAI.
+You can use a remote OpenAI-compatible endpoint for embeddings, inference, or both. For example, to use
+OpenAI for both:
 
 ```yaml
 # config.yaml
 
 embedding:
-  provider: openrouter
+  provider: openai
   model_config: text-embedding-3-small
   embedding_dim: 1536
 
 inference:
-  provider: openrouter
+  provider: openai
   model_config: gpt-4o
 ```
 
-You must set `OPENROUTER_API_KEY` and `OPENROUTER_API_BASE` in the `.env.rag` file.
+```dotenv
+# .env.rag
+OPENROUTER_API_KEY=your-api-key
+OPENROUTER_API_BASE=https://api.openai.com/v1
+```
+
+The backend retains the `OPENROUTER_API_KEY` and `OPENROUTER_API_BASE` variable names for both `openrouter`
+and `openai` provider labels. For OpenRouter, set the base URL to `https://openrouter.ai/api/v1`, select
+`provider: openrouter`, and use the provider's model IDs.
+
+RAG inference and OpenWebUI chat are configured independently. To switch OpenWebUI to the same optional
+OpenAI-compatible provider, set `ENABLE_OLLAMA_API=False`, `ENABLE_OPENAI_API=True`, `OPENAI_API_BASE_URL`,
+`OPENAI_API_KEY`, and `OPENAI_DEFAULT_MODEL` in `.env` before the first start.
 
 ## Reference of the `config.yaml`
 
@@ -531,23 +624,26 @@ The `config.yaml` file contains the main configuration of the service.
 ```yaml
 sources: # holds the list of sources to ingest from (Connectors)
 
-  - type: # type of the connector (s3, mediawiki, serpapi)
-    name: # arbitrary name for the connector, will be stored in metadata
+  - type: directory # directory, s3, mediawiki, serpapi, web, jira, pipedrive, slack, or imap
+    name: local_docs # arbitrary name for the connector, stored in metadata
     enabled: true # optional, set to false to skip this source entirely (default: true)
     config:
-      # connector specific configuration
-      schedules: "${S3_ACCOUNT1_SCHEDULES}"
+      path: "${DIRECTORY1_PATH}"
+      recursive: true
+      exclude_hidden: true
+      exclude_empty: false
+      schedules: "${DIRECTORY1_SCHEDULES}"
 
 # configures models and dimensions for embeddings
 embedding:
-  provider: openrouter # `openrouter`/`openai` or `local` for local HuggingFace embeddings
-  model_config: text-embedding-3-small # model to use
-  embedding_dim: 1536 # dimensions (check with the model docs)
+  provider: local # `local` (default), `ollama`, `openrouter`, or `openai`
+  model_config: sentence-transformers/all-mpnet-base-v2 # model to use
+  embedding_dim: 768 # dimensions must match the selected embedding model
 
 # configures the LLM provider and model
 inference:
-  provider: openrouter # `openrouter`/`openai`
-  model_config: gpt-4o # model to use
+  provider: ollama # `ollama` (default), `openrouter`, `openai`, or null
+  model_config: "${OLLAMA_DEFAULT_MODEL}" # defaults to qwen3:4b
 
 # vector store configuration
 vector_store:
@@ -565,15 +661,56 @@ vector_store:
 
 ## Tech Stack
 
-* [Rag-Of-All-Trades](https://github.com/wikiteq/rag-of-all-trades) v0.1 as a RAG backend
+* A derived [Rag-Of-All-Trades](https://github.com/wikiteq/rag-of-all-trades) image with Ollama `/v1` provider compatibility as the RAG backend
+* [Ollama](https://ollama.com/) v0.32.5 for local inference
 * [OpenWebUI](https://github.com/open-webui/open-webui) v0.6.5 as a front-end
 
 ## Troubleshooting
 
 ### OpenWebUI does not start
 
-The `openwebui` service depends on the `api` service healthiness and will remain pending until the API service
-is online. Check the `api` container for any errors, review the `config.yaml` and `.env.rag` for typos.
+The `openwebui` service waits for both a healthy `api` service and successful completion of `ollama-init`.
+Inspect all states and the relevant logs:
+
+```bash
+docker compose ps -a
+docker compose logs --tail=200 ollama ollama-init api openwebui
+```
+
+Also review `config.yaml`, `.env.rag`, and `.env` for typos or mismatched model names.
+
+### Ollama model download fails
+
+`ollama-init` must download the selected model before the API and UI start. Check that Ollama is healthy and
+that the model name is available, then retry the one-shot service:
+
+```bash
+docker compose exec ollama ollama list
+docker compose logs --tail=200 ollama-init
+docker compose up ollama-init
+```
+
+Downloaded models are retained in the `ollama_data` volume.
+
+### A changed Ollama model is not selected
+
+Set `OLLAMA_DEFAULT_MODEL` in `.env`, then run `docker compose up -d`. Compose uses that single value for the
+model pull, OpenWebUI default, and RAG inference.
+OpenWebUI provider settings are provisioned on its first boot and persisted, so an existing installation may
+also need its Ollama connection/default model updated in the Admin Panel.
+
+### Directory documents are not ingested
+
+Confirm that the host files are under the path selected by `DIRECTORY_HOST_PATH` in `.env` and are visible at
+`/data/input` inside the worker:
+
+```bash
+docker compose exec celery_worker ls -la /data/input
+docker compose logs --tail=200 celery_worker celery_beat
+```
+
+The default schedule is 3600 seconds, so ingestion is not necessarily immediate. `DIRECTORY1_PATH` should stay
+set to `/data/input` unless the Compose mount target is also changed.
 
 ### HuggingFace connection timeout
 
@@ -581,8 +718,13 @@ is online. Check the `api` container for any errors, review the `config.yaml` an
 requests.exceptions.ReadTimeout: (ReadTimeoutError("HTTPSConnectionPool(host='huggingface.co', port=443): Read timed out. (read timeout=10)"), '(Request ID: da122313-e11f-4d54-b4f3-187abfea0ca3)')
 ```
 
-OpenWebUI downloads some HuggingFace models during first boot. Sometimes HuggingFace endpoints may timeout.
-In this scenario just run `docker compose down -v` to wipe the stack and start over with `docker compose up -d`
+The default local embedding model is downloaded from HuggingFace during the first boot. If HuggingFace times
+out, verify network access and retry the affected services without deleting the database or Ollama volumes:
+
+```bash
+docker compose restart api celery_worker
+docker compose logs --tail=200 api celery_worker
+```
 
 ## Star History
 

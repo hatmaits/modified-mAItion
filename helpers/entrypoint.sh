@@ -3,11 +3,18 @@
 # Inspired by https://github.com/open-webui/open-webui/discussions/8955#discussioncomment-12548747
 # this custom entrypoint script does the following:
 # - creates pre-defined admin user account as specified in ENVs
-# - creates a pre-defined Function
+# - provisions the selected model provider, workspace model, tools, and filters
 
 set -e
 : "${HEALTHZ_PORT:?missing HEALTHZ_PORT}"
 : "${HEALTHZ_READY_FILE:?missing HEALTHZ_READY_FILE}"
+
+is_true() {
+    case "${1,,}" in
+        true|1|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 start_healthz_server() {
     # poor mans healthz server
@@ -166,72 +173,108 @@ do_first_start() {
       -H "Content-Type: application/json" \
       --data-raw '{"ENABLE_DIRECT_CONNECTIONS":false}'
 
-    # extra
-    if [ "$ENABLE_OPENAI_API" == "True" ]; then
-        if [ ! -z "$OPENAI_DEFAULT_MODEL" ]; then
-            echo ""
-            echo "[Custom entrypoint] Setting default OpenAI model.."
+    DEFAULT_CHAT_MODEL=""
+    DEFAULT_CHAT_PROVIDER=""
 
-            # setup openai provider
+    # Keep OpenAI-compatible providers available as an opt-in alternative.
+    if is_true "$ENABLE_OPENAI_API" && [ -n "$OPENAI_DEFAULT_MODEL" ]; then
+        echo ""
+        echo "[Custom entrypoint] Configuring OpenAI-compatible provider"
+        OPENAI_CONFIG_DATA=$(jq -n \
+          --arg url "$OPENAI_API_BASE_URL" \
+          --arg key "$OPENAI_API_KEY" \
+          --arg model "$OPENAI_DEFAULT_MODEL" \
+          '{ENABLE_OPENAI_API:true,OPENAI_API_BASE_URLS:[$url],OPENAI_API_KEYS:[$key],OPENAI_API_CONFIGS:{"0":{enable:true,tags:[],prefix_id:"",model_ids:[$model]}}}')
+        curl -fsS -X POST "http://localhost:8080/openai/config/update" \
+          -H "Authorization: Bearer ${API_KEY}" \
+          -H "Content-Type: application/json" \
+          --data-raw "${OPENAI_CONFIG_DATA}"
+
+        DEFAULT_CHAT_MODEL="$OPENAI_DEFAULT_MODEL"
+        DEFAULT_CHAT_PROVIDER="openai"
+    fi
+
+    # Ollama has priority when both providers are explicitly enabled.
+    if is_true "$ENABLE_OLLAMA_API"; then
+        if [ -z "$OLLAMA_BASE_URL" ] || [ -z "$OLLAMA_DEFAULT_MODEL" ]; then
+            echo "[Custom entrypoint] ERROR: ENABLE_OLLAMA_API=True requires OLLAMA_BASE_URL and OLLAMA_DEFAULT_MODEL" >&2
+            exit 1
+        fi
+
+        echo ""
+        echo "[Custom entrypoint] Configuring Ollama provider"
+        OLLAMA_CONFIG_DATA=$(jq -n \
+          --arg url "$OLLAMA_BASE_URL" \
+          --arg model "$OLLAMA_DEFAULT_MODEL" \
+          '{ENABLE_OLLAMA_API:true,OLLAMA_BASE_URLS:[$url],OLLAMA_API_CONFIGS:{"0":{enable:true,model_ids:[$model]}}}')
+        curl -fsS -X POST "http://localhost:8080/ollama/config/update" \
+          -H "Authorization: Bearer ${API_KEY}" \
+          -H "Content-Type: application/json" \
+          --data-raw "${OLLAMA_CONFIG_DATA}"
+
+        DEFAULT_CHAT_MODEL="$OLLAMA_DEFAULT_MODEL"
+        DEFAULT_CHAT_PROVIDER="ollama"
+    fi
+
+    if [ -n "$DEFAULT_CHAT_MODEL" ]; then
+        echo ""
+        echo "[Custom entrypoint] Setting global default model to ${DEFAULT_CHAT_PROVIDER}/${DEFAULT_CHAT_MODEL}"
+        DEFAULT_MODEL_CONFIG=$(jq -n \
+          --arg model "$DEFAULT_CHAT_MODEL" \
+          '{DEFAULT_MODELS:$model,MODEL_ORDER_LIST:[$model]}')
+        curl -fsS -X POST "http://localhost:8080/api/v1/configs/models" \
+          -H "Authorization: Bearer ${API_KEY}" \
+          -H "Content-Type: application/json" \
+          --data-raw "${DEFAULT_MODEL_CONFIG}"
+
+        if [ -n "$WORKSPACE_MODEL_FILE" ]; then
             echo ""
-            echo "[Custom entrypoint] Adding provider"
-            curl -s -X POST "http://localhost:8080/openai/config/update" \
+            echo "[Custom entrypoint] Making default model private"
+            BASE_MODEL_DATA=$(jq -n \
+              --arg model "$DEFAULT_CHAT_MODEL" \
+              '{id:$model,name:$model,base_model_id:null,params:{function_calling:"native"},meta:{profile_image_url:"/static/favicon.png",description:null,suggestion_prompts:null,tags:[],capabilities:{vision:false,citations:true}},access_control:{read:{group_ids:[],user_ids:[]},write:{group_ids:[],user_ids:[]}},is_active:true}')
+            curl -fsS -X POST "http://localhost:8080/api/v1/models/create" \
               -H "Authorization: Bearer ${API_KEY}" \
               -H "Content-Type: application/json" \
-              --data-raw "{\"ENABLE_OPENAI_API\":true,\"OPENAI_API_BASE_URLS\":[\"$OPENAI_API_BASE_URL\"],\"OPENAI_API_KEYS\":[\"$OPENAI_API_KEY\"],\"OPENAI_API_CONFIGS\":{\"0\":{\"enable\":true,\"tags\":[],\"prefix_id\":\"\",\"model_ids\":[\"$OPENAI_DEFAULT_MODEL\"]}}}"
+              --data-raw "${BASE_MODEL_DATA}"
 
-            # set the model as default
             echo ""
-            echo "[Custom entrypoint] Adding default model"
-            curl -s -X POST "http://localhost:8080/api/v1/users/user/settings/update" \
-              -H "Authorization: Bearer ${API_KEY}" \
-              -H "Content-Type: application/json" \
-              --data-raw "{\"ui\":{\"version\":\"0.6.5\",\"models\":[\"$OPENAI_DEFAULT_MODEL\"]}}"
+            echo "[Custom entrypoint] Creating Workspace model"
+            WORKSPACE_MODEL_DATA=$(jq \
+              --arg base_model "$DEFAULT_CHAT_MODEL" \
+              '.[0].base_model_id = $base_model | .[0]' \
+              "/etc/owui-models/${WORKSPACE_MODEL_FILE}")
 
-            if [ -n "$WORKSPACE_MODEL_FILE" ]; then
-                echo ""
-                echo "[Custom entrypoint] Making default model private"
-                curl -s -X POST "http://localhost:8080/api/v1/models/create" \
-                  -H "Authorization: Bearer ${API_KEY}" \
-                  -H "Content-Type: application/json" \
-                  --data-raw "{\"id\":\"$OPENAI_DEFAULT_MODEL\",\"name\":\"$OPENAI_DEFAULT_MODEL\",\"base_model_id\":null,\"params\":{\"function_calling\":\"native\"},\"meta\":{\"profile_image_url\":\"/static/favicon.png\",\"description\":null,\"suggestion_prompts\":null,\"tags\":[],\"capabilities\":{\"vision\":false,\"citations\":true}},\"access_control\":{\"read\":{\"group_ids\":[],\"user_ids\":[]},\"write\":{\"group_ids\":[],\"user_ids\":[]}},\"is_active\":true}"
-
-                echo ""
-                echo "[Custom entrypoint] Creating Workspace model"
-                WORKSPACE_MODEL_DATA=$(jq \
-                  --arg base_model "$OPENAI_DEFAULT_MODEL" \
-                  '.[0].base_model_id = $base_model | .[0]' \
-                  "/etc/owui-models/${WORKSPACE_MODEL_FILE}")
-
-                if [ -n "$OWUI_MODEL_PROMPT" ]; then
-                    WORKSPACE_MODEL_DATA=$(echo "${WORKSPACE_MODEL_DATA}" | jq \
-                      --arg prompt "$OWUI_MODEL_PROMPT" \
-                      '.params.system = $prompt')
-                fi
-
-                if [ -n "$OWUI_MODEL_PROMPT_APPEND" ]; then
-                    WORKSPACE_MODEL_DATA=$(echo "${WORKSPACE_MODEL_DATA}" | jq \
-                      --arg append "$OWUI_MODEL_PROMPT_APPEND" \
-                      '.params.system = (.params.system + "\n\n" + $append)')
-                fi
-
-                if [ "$TOOL_MEDIAWIKI_ENABLED" == "True" ]; then
-                    WORKSPACE_MODEL_DATA=$(echo "${WORKSPACE_MODEL_DATA}" | jq \
-                      '.meta.toolIds += ["mediawiki"]')
-                fi
-                curl -s -X POST "http://localhost:8080/api/v1/models/create" \
-                  -H "Authorization: Bearer ${API_KEY}" \
-                  -H "Content-Type: application/json" \
-                  --data-raw "${WORKSPACE_MODEL_DATA}"
-            else
-                echo ""
-                echo "[Custom entrypoint] Making default model public"
-                curl -s -X POST "http://localhost:8080/api/v1/models/create" \
-                  -H "Authorization: Bearer ${API_KEY}" \
-                  -H "Content-Type: application/json" \
-                  --data-raw "{\"id\":\"$OPENAI_DEFAULT_MODEL\",\"name\":\"$OPENAI_DEFAULT_MODEL\",\"base_model_id\":null,\"params\":{\"function_calling\":\"native\"},\"meta\":{\"profile_image_url\":\"/static/favicon.png\",\"description\":null,\"suggestion_prompts\":null,\"tags\":[],\"capabilities\":{\"vision\":false,\"citations\":true}},\"access_control\":null,\"is_active\":true}"
+            if [ -n "$OWUI_MODEL_PROMPT" ]; then
+                WORKSPACE_MODEL_DATA=$(echo "${WORKSPACE_MODEL_DATA}" | jq \
+                  --arg prompt "$OWUI_MODEL_PROMPT" \
+                  '.params.system = $prompt')
             fi
 
+            if [ -n "$OWUI_MODEL_PROMPT_APPEND" ]; then
+                WORKSPACE_MODEL_DATA=$(echo "${WORKSPACE_MODEL_DATA}" | jq \
+                  --arg append "$OWUI_MODEL_PROMPT_APPEND" \
+                  '.params.system = (.params.system + "\n\n" + $append)')
+            fi
+
+            if is_true "$TOOL_MEDIAWIKI_ENABLED"; then
+                WORKSPACE_MODEL_DATA=$(echo "${WORKSPACE_MODEL_DATA}" | jq \
+                  '.meta.toolIds += ["mediawiki"]')
+            fi
+            curl -fsS -X POST "http://localhost:8080/api/v1/models/create" \
+              -H "Authorization: Bearer ${API_KEY}" \
+              -H "Content-Type: application/json" \
+              --data-raw "${WORKSPACE_MODEL_DATA}"
+        else
+            echo ""
+            echo "[Custom entrypoint] Making default model public"
+            BASE_MODEL_DATA=$(jq -n \
+              --arg model "$DEFAULT_CHAT_MODEL" \
+              '{id:$model,name:$model,base_model_id:null,params:{function_calling:"native"},meta:{profile_image_url:"/static/favicon.png",description:null,suggestion_prompts:null,tags:[],capabilities:{vision:false,citations:true}},access_control:null,is_active:true}')
+            curl -fsS -X POST "http://localhost:8080/api/v1/models/create" \
+              -H "Authorization: Bearer ${API_KEY}" \
+              -H "Content-Type: application/json" \
+              --data-raw "${BASE_MODEL_DATA}"
         fi
     fi
 
@@ -245,8 +288,8 @@ do_first_start() {
           --data-raw "{\"name\":\"$X_WEBUI_USER_NAME\",\"email\":\"$X_WEBUI_USER_EMAIL\",\"password\":\"$X_WEBUI_USER_PASS\",\"role\":\"user\"}"
     fi
 
-    #disable ollama API
-    if [ "$ENABLE_OLLAMA_API" == "false" ] || [ "$ENABLE_OLLAMA_API" == "False" ]; then
+    # Disable Ollama explicitly when another provider is selected.
+    if ! is_true "$ENABLE_OLLAMA_API"; then
         echo ""
         echo "[Custom entrypoint] Disabling Ollama"
         curl -s -X POST "http://localhost:8080/ollama/config/update" \

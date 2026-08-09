@@ -2,7 +2,7 @@
     {
         "id": "wikiteqcenturion",
         "user_id": "",
-        "base_model_id": "openai/gpt-4.1-nano",
+        "base_model_id": "qwen3:4b",
         "name": "wikiteq/centurion",
         "params":
         {
@@ -16,7 +16,7 @@
             "description": "An intelligent knowledge management model ",
             "capabilities":
             {
-                "vision": true,
+                "vision": false,
                 "usage": false,
                 "citations": true
             },

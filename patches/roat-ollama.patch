@@ -1,0 +1,142 @@
+diff --git a/utils/config.py b/utils/config.py
+--- a/utils/config.py
++++ b/utils/config.py
+@@ -22,8 +22,10 @@ class EnvSettings(BaseSettings):
+     POSTGRES_PORT: int
+     DATABASE_URL: str
+ 
+-    OPENROUTER_API_KEY: str
+-    OPENROUTER_API_BASE: str
++    OPENROUTER_API_KEY: str = ""
++    OPENROUTER_API_BASE: str = "https://openrouter.ai/api/v1"
++    OLLAMA_API_KEY: str = "ollama"
++    OLLAMA_API_BASE: str = "http://ollama:11434/v1"
+     API_KEY: str = ""
+     MCP_ENABLE: bool = False
+     MCP_API_KEY: str = ""
+@@ -148,13 +150,34 @@ class Settings:
+         return sources
+ 
+     @property
+-    def LLM(self):
++    def OPENAI_COMPATIBLE(self):
+         return {
+             "api_key": self.env.OPENROUTER_API_KEY,
+             "base_url": self.env.OPENROUTER_API_BASE,
+-            "provider": self.yaml.get("inference", {}).get("provider"),
+-            "llm_model": self.yaml.get("inference", {}).get("model_config"),
+         }
+ 
++    @property
++    def OLLAMA(self):
++        base_url = self.env.OLLAMA_API_BASE.rstrip("/")
++        if not base_url.endswith("/v1"):
++            base_url = f"{base_url}/v1"
++        return {
++            # Ollama ignores this local compatibility key, while the OpenAI
++            # client requires a non-empty value.
++            "api_key": self.env.OLLAMA_API_KEY.strip() or "ollama",
++            "base_url": base_url,
++        }
++
++    @property
++    def LLM(self):
++        provider = self.yaml.get("inference", {}).get("provider")
++        provider = provider.lower() if isinstance(provider, str) else provider
++        connection = self.OLLAMA if provider == "ollama" else self.OPENAI_COMPATIBLE
++        return {
++            **connection,
++            "provider": provider,
++            "llm_model": self.yaml.get("inference", {}).get("model_config"),
++        }
++
+ 
+ settings = Settings()
+diff --git a/utils/llm_embedding.py b/utils/llm_embedding.py
+--- a/utils/llm_embedding.py
++++ b/utils/llm_embedding.py
+@@ -10,27 +10,56 @@ os.environ["CUDA_VISIBLE_DEVICES"] = settings.env.CUDA_VISIBLE_DEVICES
+ os.environ["ORT_DISABLE_GPU"] = str(settings.env.ORT_DISABLE_GPU)
+ os.environ["ORT_DYLD_DISABLE_GPU"] = str(settings.env.ORT_DYLD_DISABLE_GPU)
+ 
+ embeddings_provider = settings.EMBEDDING.get("provider")
+ llm_provider = settings.LLM.get("provider")
++if isinstance(embeddings_provider, str):
++    embeddings_provider = embeddings_provider.lower()
++if isinstance(llm_provider, str):
++    llm_provider = llm_provider.lower()
+ 
+ 
+ # Initialize embedding model
+ if embeddings_provider == "local":
+     embed_model = HuggingFaceEmbedding(
+         model_name=settings.EMBEDDING["model_config"], trust_remote_code=True, device="cpu"
+     )
+-else:
++elif embeddings_provider == "ollama":
++    embed_model = OpenAIEmbedding(
++        api_key=settings.OLLAMA["api_key"],
++        api_base=settings.OLLAMA["base_url"],
++        model_name=settings.EMBEDDING["model_config"],
++    )
++elif embeddings_provider in ("openai", "openrouter"):
+     embed_model = OpenAIEmbedding(
+-        api_key=settings.LLM["api_key"],
+-        api_base=settings.LLM["base_url"],
++        api_key=settings.OPENAI_COMPATIBLE["api_key"],
++        api_base=settings.OPENAI_COMPATIBLE["base_url"],
+         model_name=settings.EMBEDDING["model_config"],
+     )
++else:
++    raise ValueError(
++        f"Unsupported embedding provider: {settings.EMBEDDING.get('provider')}. "
++        "Expected one of: local, ollama, openai, openrouter."
++    )
+ 
+ # Initialize LLM
+ llm = None
+ if llm_provider in ("openai", "openrouter"):
+     llm = OpenRouter(
+         api_key=settings.LLM.get("api_key"), model=settings.LLM.get("llm_model"), api_base=settings.LLM["base_url"]
+     )
++elif llm_provider == "ollama":
++    # Ollama exposes an OpenAI-compatible API at /v1. Reusing the pinned
++    # OpenAI-like adapter keeps the derived image small while making Ollama a
++    # first-class provider in config.yaml.
++    llm = OpenRouter(
++        api_key=settings.OLLAMA["api_key"],
++        model=settings.LLM.get("llm_model"),
++        api_base=settings.OLLAMA["base_url"],
++    )
++elif llm_provider not in (None, "", "none"):
++    raise ValueError(
++        f"Unsupported inference provider: {settings.LLM.get('provider')}. "
++        "Expected one of: ollama, openai, openrouter, none."
++    )
+ 
+ __all__ = ["embed_model", "llm"]
+diff --git a/main.py b/main.py
+--- a/main.py
++++ b/main.py
+@@ -53,7 +53,7 @@ def validate_configuration():
+         logger.warning("No ingestion sources configured - Celery tasks will not be registered")
+ 
+     # Validate LLM for rephrase endpoint (optional but warn)
+-    if settings.LLM.get("provider") not in ("openai", "openrouter", None):
++    if settings.LLM.get("provider") not in ("ollama", "openai", "openrouter", None, "none"):
+         logger.warning(f"Unknown LLM provider: {settings.LLM.get('provider')}. Rephrase endpoint may not work.")
+ 
+     # Validate MCP API key (only if MCP is enabled)
+diff --git a/api/v1/rephrase_retrieval/routes.py b/api/v1/rephrase_retrieval/routes.py
+--- a/api/v1/rephrase_retrieval/routes.py
++++ b/api/v1/rephrase_retrieval/routes.py
+@@ -23,8 +23,8 @@ def get_rag_engine(request: Request) -> RAGQueryEngine:
+ 
+     # Validate LLM BEFORE we build engine
+     if llm is None:
+         raise HTTPException(
+-            status_code=503, detail="LLM is not configured. Please set OPENAI_API_KEY and LLM model name."
++            status_code=503, detail="LLM is not configured. Please configure an inference provider and model name."
+         )
+ 
+     return request.app.state.rag_engine

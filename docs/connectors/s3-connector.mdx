@@ -10,6 +10,10 @@ keywords:
 
 Use S3 Connector to ingest documents from [S3](https://aws.amazon.com/s3/-compatible) object storage (AWS S3, MinIO, B2, R2, etc).
 
+S3 is optional and disabled in `config.yaml.example`. The default source is the
+[Directory connector](/connectors/directory-connector). To use S3, uncomment an
+S3 source in `config.yaml` and configure the variables below.
+
 ## What It Does
 
 - reads files from one or more buckets

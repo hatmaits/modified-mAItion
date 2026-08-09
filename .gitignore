@@ -4,5 +4,7 @@
 config.yaml
 !.env.*.example
 model-cache/
+data/input/*
+!data/input/.gitkeep
 compose.override.yaml
 .gstack/

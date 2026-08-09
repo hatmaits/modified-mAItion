@@ -2,7 +2,7 @@
 	"$schema": "https://mintlify.com/docs.json",
 	"theme": "maple",
 	"name": "mAItion",
-	"description": "mAItion is an all-in-one ready-to-use AI-powered tool that combines your existing knowledge with LLMs, allowing you to chat, search and interact with your data through a slick chat interface.",
+	"description": "Run a local-first AI knowledge platform with Compose-managed Ollama, local files, retrieval, and optional cloud connectors.",
 	"colors": {
 		"primary": "#ff0000"
 	},
@@ -64,13 +64,13 @@
 					{
 						"group": "Connectors",
 						"pages": [
+							"connectors/directory-connector",
 							"connectors/s3-connector",
 							"connectors/mediawiki-connector",
 							"connectors/serpapi-connector",
 							"connectors/jira-connector",
 							"connectors/pipedrive-connector",
-							"connectors/web-connector",
-							"connectors/directory-connector"
+							"connectors/web-connector"
 						]
 					},
 					{

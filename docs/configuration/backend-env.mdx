@@ -18,11 +18,33 @@ Reference value for `.env.rag` file.
 - `POSTGRES_DB`: backend database name
 - `POSTGRES_HOST`: Postgres host/service name
 - `POSTGRES_PORT`: Postgres port
+- `DATABASE_URL`: complete backend database connection URL
 
-## LLM Provider
+## Ollama Provider (Default)
 
-- `OPENROUTER_API_KEY`: API key for OpenRouter/OpenAI-compatible backend
-- `OPENROUTER_API_BASE`: base URL for provider API
+- `OLLAMA_API_KEY`: required client placeholder (default: `ollama`; ignored by local Ollama)
+- `OLLAMA_API_BASE`: backend inference URL (default: `http://ollama:11434/v1`)
+- `OLLAMA_DEFAULT_MODEL`: backend rephrase model injected by Compose from the root `.env` file (default: `qwen3:4b`)
+
+The backend uses an OpenAI-compatible client, so `OLLAMA_API_BASE` must include
+`/v1`. Set `OLLAMA_DEFAULT_MODEL` once in the root `.env`; Compose injects it into
+the backend and also uses it for the model pull and OpenWebUI default.
+
+## OpenAI-Compatible Provider (Optional)
+
+- `OPENROUTER_API_KEY`: API key for OpenRouter or another OpenAI-compatible backend
+- `OPENROUTER_API_BASE`: compatible provider base URL (default example: `https://openrouter.ai/api/v1`)
+
+These variables are ignored while `inference.provider` is `ollama` in
+`config.yaml`. To opt in, change that provider to `openrouter` or `openai`.
+
+## Default Directory Connector
+
+- `DIRECTORY1_PATH`: path inside the worker container (default: `/data/input`)
+- `DIRECTORY1_SCHEDULES`: ingestion interval in seconds (default: `3600`)
+
+The corresponding host path is `DIRECTORY_HOST_PATH` in `.env` and defaults to
+`./data/input`.
 
 ## Workers and Limits
 
@@ -52,3 +74,16 @@ Reference value for `.env.rag` file.
 
 - `MCP_ENABLE`: enable the MCP server (`1`/`0`, default: `0`)
 - `MCP_API_KEY`: Bearer token clients must present to authenticate. Required when `MCP_ENABLE=1` — the service will not start if this is empty. Generate with `openssl rand -hex 32`
+
+## Minimal Default Provider and Source Example
+
+```dotenv
+OLLAMA_API_KEY=ollama
+OLLAMA_API_BASE=http://ollama:11434/v1
+
+OPENROUTER_API_KEY=
+OPENROUTER_API_BASE=https://openrouter.ai/api/v1
+
+DIRECTORY1_PATH=/data/input
+DIRECTORY1_SCHEDULES=3600
+```

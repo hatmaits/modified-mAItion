@@ -14,7 +14,31 @@ mAItion is an AI knowledge platform that ingests data from connectors and lets y
 
 ## Do I need OpenAI or OpenRouter to start?
 
-Not for basic ingestion and retrieval. For rephrase/chat model calls, configure provider keys in env files.
+No. The default Compose stack runs Ollama locally, downloads `qwen3:4b`, and uses
+it for OpenWebUI chat and backend rephrasing. Local embeddings and the Directory
+connector also require no hosted API key.
+
+OpenRouter and OpenAI-compatible services are optional alternatives.
+
+## Which Ollama URL should I configure?
+
+The two components use different Ollama interfaces:
+
+- OpenWebUI: `OLLAMA_BASE_URL=http://ollama:11434` in `.env`
+- RAG backend: `OLLAMA_API_BASE=http://ollama:11434/v1` in `.env.rag`
+
+The `/v1` suffix belongs only on the backend URL because that client uses
+Ollama's OpenAI-compatible API.
+
+## Why does the first start take longer?
+
+The `ollama-init` service downloads `qwen3:4b` before the API and OpenWebUI start.
+Download time depends on your network. Check progress and the installed models with:
+
+```bash
+docker compose logs ollama-init
+docker compose exec ollama ollama list
+```
 
 ## Why do I not see my documents in answers yet?
 
@@ -22,14 +46,17 @@ Most common causes:
 
 - connector is not configured
 - ingestion schedule did not run yet
-- source credentials are wrong
+- the host directory is empty or mounted at the wrong path
+- source credentials are wrong for an optional remote connector
 
-Check connector env vars, `config.yaml`, and service health with `docker compose ps`.
+For the default setup, place files in `./data/input`, keep
+`DIRECTORY1_PATH=/data/input`, and check `docker compose logs celery_worker`.
 
 ## How often does data refresh?
 
 Per connector schedule. Configure schedule env vars (in seconds), for example:
 
+- `DIRECTORY1_SCHEDULES` (default: `3600`)
 - `S3_ACCOUNT1_SCHEDULES`
 - `MEDIAWIKI1_SCHEDULES`
 - `SERPAPI1_SCHEDULES`
@@ -40,13 +67,29 @@ Yes. You can enable multiple source types and multiple instances of the same typ
 
 ## Can I use multiple S3 accounts or buckets?
 
-Yes. Add additional source entries and matching env vars (`S3_ACCOUNT2_*`, `S3_ACCOUNT3_*`, etc). You
-can also configure individual connectors to use different buckets to keep provenance separate.
+Yes. S3 is optional. Uncomment an S3 source in `config.yaml`, set its matching
+`.env.rag` variables, and add further entries such as `S3_ACCOUNT2_*` when needed.
 
 ## What is the difference between frontend and backend env files?
 
 - `.env.openwebui.example`: Frontend runtime and admin bootstrap settings
-- `.env.rag.example`: RAG backend API/workers, connectors, rate limits, provider config
+- `.env.rag.example`: RAG backend API/workers, connectors, rate limits, and provider config
+
+The copied frontend file is named `.env`. It also controls Compose substitutions,
+including `DIRECTORY_HOST_PATH` and the model pulled by `ollama-init`.
+
+## How do I change the default Ollama model?
+
+Set `OLLAMA_DEFAULT_MODEL` in `.env`, then recreate the stack. Compose supplies
+that value to every RAG service and pulls the selected model automatically:
+
+```bash
+docker compose up -d --force-recreate
+```
+
+The model pull and RAG services use the new value immediately. OpenWebUI stores
+provider settings in its persistent volume, so an existing installation may also
+need its Ollama connection and global default updated in the Admin Panel.
 
 ## Is `ENABLE_SIGNUP` required?
 
@@ -56,3 +99,4 @@ Keep `ENABLE_SIGNUP=True` on first start for admin auto-provisioning, then disab
 
 - Keep sources fresh (shorter schedules)
 - Use reliable embedding and inference models
+- Give the first ingestion run time to finish before testing retrieval

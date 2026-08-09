@@ -8,13 +8,16 @@ keywords:
   - environment variables
 ---
 
-Reference value for `.env` file.
+Reference for `.env`, created from `.env.openwebui.example`. In addition to
+OpenWebUI settings, this file supplies host-side Docker Compose values.
 
 ## URL and Port
 
 - `WEBUI_URL`: public URL of OpenWebUI (example: `http://localhost:3000`)
+- `WEBUI_BIND_HOST`: host interface used by the published port (default: `127.0.0.1`)
 - `HTTP_WEB_PORT`: host port mapped to OpenWebUI container
 - `WEBUI_SECRET_KEY`: app secret key (generate strong random value)
+- `DIRECTORY_HOST_PATH`: host directory mounted read-only into the ingestion worker (default: `./data/input`)
 
 ## Database
 
@@ -36,12 +39,26 @@ Reference value for `.env` file.
 > Note: keep `ENABLE_SIGNUP=True` on first start so admin account auto-provisioning
 works. After first boot, you can disable it to run in single-user or private modes.
 
+## Ollama Provider (Default)
+
+- `ENABLE_OLLAMA_API`: configure OpenWebUI's native Ollama provider (default: `True`)
+- `OLLAMA_BASE_URL`: native Ollama root URL (default: `http://ollama:11434`)
+- `OLLAMA_DEFAULT_MODEL`: model pulled at startup and selected in OpenWebUI (default: `qwen3:4b`)
+- `OLLAMA_CONTEXT_LENGTH`: context window configured on the Compose-managed Ollama service (default: `8192`)
+
+Do not append `/v1` to `OLLAMA_BASE_URL`. OpenWebUI uses Ollama's native API.
+The RAG backend has a separate `/v1` URL in `.env.rag`.
+
 ## OpenAI-Compatible Provider (Optional)
 
 - `ENABLE_OPENAI_API`: auto-provision provider settings (`True`/`False`)
 - `OPENAI_API_BASE_URL`: provider base URL (example: `https://openrouter.ai/api/v1`)
 - `OPENAI_API_KEY`: provider API key
 - `OPENAI_DEFAULT_MODEL`: default model ID
+
+These settings are disabled in the example. Set `ENABLE_OLLAMA_API=False` and
+`ENABLE_OPENAI_API=True` to use an OpenAI-compatible provider as the default.
+If both are enabled, Ollama takes priority as the default model.
 
 ## Runtime
 
@@ -53,7 +70,9 @@ works. After first boot, you can disable it to run in single-user or private mod
 
 ```dotenv
 WEBUI_URL=http://localhost:3000
+WEBUI_BIND_HOST=127.0.0.1
 HTTP_WEB_PORT=3000
+DIRECTORY_HOST_PATH=./data/input
 WEBUI_SECRET_KEY=<random-hex>
 
 POSTGRES_USER=postgres
@@ -69,9 +88,14 @@ WEBUI_AUTH=True
 ENABLE_SIGNUP=True
 ENABLE_LOGIN_FORM=True
 
-ENABLE_OPENAI_API=True
+ENABLE_OLLAMA_API=True
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_DEFAULT_MODEL=qwen3:4b
+OLLAMA_CONTEXT_LENGTH=8192
+
+ENABLE_OPENAI_API=False
 OPENAI_API_BASE_URL=https://openrouter.ai/api/v1
-OPENAI_API_KEY=<api-key>
+OPENAI_API_KEY=
 OPENAI_DEFAULT_MODEL=openai/gpt-4.1-nano
 
 ENV=dev

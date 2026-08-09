@@ -1,0 +1,19 @@
+ARG ROAT_BASE_IMAGE=ghcr.io/wikiteq/rag-of-all-trades:bcdfb51
+FROM ${ROAT_BASE_IMAGE}
+
+USER root
+
+# The pinned upstream image supports only OpenAI/OpenRouter provider labels.
+# Apply a small, reviewable compatibility patch so `provider: ollama` routes
+# to Ollama's OpenAI-compatible /v1 API without introducing a cloud dependency.
+COPY patches/roat-ollama.patch /tmp/roat-ollama.patch
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends patch \
+    && patch --batch --forward -p1 -d /app < /tmp/roat-ollama.patch \
+    && python -m py_compile \
+        /app/utils/config.py \
+        /app/utils/llm_embedding.py \
+        /app/main.py \
+        /app/api/v1/rephrase_retrieval/routes.py \
+    && rm -f /tmp/roat-ollama.patch \
+    && rm -rf /var/lib/apt/lists/*

@@ -1,10 +1,15 @@
+x-roat-service: &roat-service
+  build:
+    context: .
+    dockerfile: Dockerfile.roat
+
 services:
 
   # OWUI front-end
   openwebui:
     image: ghcr.io/open-webui/open-webui:0.6.5
     ports:
-      - "${HTTP_WEB_PORT:-3000}:8080"
+      - "${WEBUI_BIND_HOST:-127.0.0.1}:${HTTP_WEB_PORT:-3000}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -12,6 +17,8 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
     volumes:
       - open-webui:/app/backend/data
       - open-webui-model-cache:/app/backend/data/cache/embedding/models
@@ -27,7 +34,7 @@ services:
       - ./models:/etc/owui-models:ro
       - ./helpers/entrypoint.sh:/custom-entrypoint.sh
       - ./helpers/healthz.py:/etc/healthz.py
-      - ./patches:/etc/patches
+      - ./patches/branding.patch:/etc/patches/branding.patch:ro
       - ./static:/app/build/static:ro
       - ./static/favicon.png:/app/build/favicon.png:ro
     entrypoint: /custom-entrypoint.sh
@@ -57,12 +64,41 @@ services:
       - USER_PERMISSIONS_CHAT_VALVES=False
       - ENABLE_DIRECT_CONNECTIONS=False
       - ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS=False
+      - OLLAMA_DEFAULT_MODEL=${OLLAMA_DEFAULT_MODEL:-qwen3:4b}
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:${HEALTHZ_PORT:-8081}/healthz || exit 1" ]
       interval: 5s
       timeout: 2s
       retries: 5
       start_period: 5s
+
+  # local Ollama inference server
+  ollama:
+    image: ollama/ollama:0.32.5
+    environment:
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-8192}
+      - OLLAMA_NOHISTORY=true
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: [ "CMD", "ollama", "list" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  # pull the configured model before the API and UI start
+  ollama-init:
+    image: ollama/ollama:0.32.5
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: [ "/bin/ollama" ]
+    command: [ "pull", "${OLLAMA_DEFAULT_MODEL:-qwen3:4b}" ]
+    restart: "no"
 
   # database
   postgres:
@@ -96,7 +132,7 @@ services:
 
   # rag-of-all-trades API
   api:
-    image: ghcr.io/wikiteq/rag-of-all-trades:bcdfb51
+    <<: *roat-service
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -104,8 +140,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
     env_file:
       - .env.rag
+    environment:
+      - OLLAMA_DEFAULT_MODEL=${OLLAMA_DEFAULT_MODEL:-qwen3:4b}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - api-modesl-cache:/root/.cache
@@ -120,7 +160,7 @@ services:
 
   # rag-of-all-trades WORKER
   celery_worker:
-    image: ghcr.io/wikiteq/rag-of-all-trades:bcdfb51
+    <<: *roat-service
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -132,8 +172,10 @@ services:
       - .env.rag
     environment:
       - PYTHONPATH=/app
+      - OLLAMA_DEFAULT_MODEL=${OLLAMA_DEFAULT_MODEL:-qwen3:4b}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+      - ${DIRECTORY_HOST_PATH:-./data/input}:/data/input:ro
     command: >-
       bash -c "celery -A celery_app worker
       --pool=prefork --concurrency=${CELERY_CONCURRENCY:-2}
@@ -146,7 +188,7 @@ services:
 
   # rag-of-all-trades BEAT
   celery_beat:
-    image: ghcr.io/wikiteq/rag-of-all-trades:bcdfb51
+    <<: *roat-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -156,6 +198,7 @@ services:
       - .env.rag
     environment:
       - PYTHONPATH=/app
+      - OLLAMA_DEFAULT_MODEL=${OLLAMA_DEFAULT_MODEL:-qwen3:4b}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     command: >-
@@ -169,3 +212,4 @@ volumes:
   postgres_data:
   redis_data:
   api-modesl-cache:
+  ollama_data:

@@ -13,6 +13,10 @@ keywords:
 mAItion is an all-in-one, ready-to-use AI platform that combines your existing knowledge
 with large language models (LLMs).
 
+The default deployment is local-first: Docker Compose runs Ollama with `qwen3:4b`,
+indexes files from `./data/input`, and uses a local embedding model. No hosted LLM
+API key or S3 bucket is required to get started.
+
 It gives you a single chat interface to:
 
 - Chat with your data
@@ -32,10 +36,9 @@ It gives you a single chat interface to:
 
 ## How It Works
 
-mAItion seamlessly ingests data from a wide array of connectors, including Jira,
-Confluence, Notion, S3, MediaWiki, search sources, and many more, indexes it efficiently,
-and makes it readily available for AI-powered retrieval and chat through versatile
-integrations such as Slack, Microsoft Teams, Open WebUI, and numerous others.
+mAItion ingests local files by default and can also connect to S3, Jira, MediaWiki,
+web, search, and other sources. It indexes that content and makes it available for
+retrieval and chat in OpenWebUI or through the API and MCP server.
 
 You can run local or remote models, configure ingestion pipelines, and adapt the platform
 for both personal and team workflows.
@@ -43,8 +46,11 @@ for both personal and team workflows.
 ## Connectors
 
 <CardGroup cols={3}>
+	<Card title="Directory" href="/connectors/directory-connector">
+		Default source: ingest files from `./data/input` or another host directory.
+	</Card>
 	<Card title="S3" href="/connectors/s3-connector">
-		Ingest files from AWS S3 and S3-compatible storage.
+		Optionally ingest files from AWS S3 and S3-compatible storage.
 	</Card>
 	<Card title="Mediawiki" href="/connectors/mediawiki-connector">
 		Ingest wiki content from MediaWiki API endpoints.
@@ -61,9 +67,6 @@ for both personal and team workflows.
 	<Card title="Pipedrive" href="/connectors/pipedrive-connector">
 		Ingest CRM records from Pipedrive.
 	</Card>
-	<Card title="Directory" href="/connectors/directory-connector">
-		Ingest files from a local filesystem directory.
-	</Card>
 </CardGroup>
 
 ## Who It Is For
@@ -72,7 +75,7 @@ mAItion is built for teams and individuals who need one place to work with organ
 knowledge, including:
 
 - Internal docs and wikis content
-- Files stored in a cloud
+- Files stored locally or in cloud systems
 - External search context
 - Other 3rd party sources
 
@@ -80,4 +83,3 @@ knowledge, including:
 
 This documentation covers Setup, Configuration, Connectors, and day-to-day usage so you can get
 mAItion running quickly and customize it for your environment.
-

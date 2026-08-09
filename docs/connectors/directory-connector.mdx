@@ -10,6 +10,9 @@ keywords:
 
 Use the Directory Connector to ingest files from a local filesystem directory into the mAItion knowledge base.
 
+Directory is the default source. With the supplied files, documents placed in
+`./data/input` on the host are available to the worker at `/data/input`.
+
 ## What It Does
 
 - reads files from a directory path mounted inside the container
@@ -18,18 +21,18 @@ Use the Directory Connector to ingest files from a local filesystem directory in
 - optionally limits the number of files ingested
 - runs ingestion on a configurable schedule
 
-## Prerequisites
+## Default Setup
 
-The directory must be accessible inside the `celery_worker` container. Mount it as a Docker volume in `compose.yaml`:
+No Compose edit is needed. Copy or save documents under `./data/input/`.
 
-```yaml
-services:
-  celery_worker:
-    volumes:
-      - /path/on/host:/data/docs:ro
-```
+| Setting | Default | File |
+|---|---|---|
+| Host path | `./data/input` | `DIRECTORY_HOST_PATH` in `.env` |
+| Container path | `/data/input` | worker volume in `compose.yaml` |
+| Connector path | `/data/input` | `DIRECTORY1_PATH` in `.env.rag` |
+| Scan interval | `3600` seconds | `DIRECTORY1_SCHEDULES` in `.env.rag` |
 
-Use the same container path (e.g. `/data/docs`) as the `path` value in `config.yaml`.
+The mount is read-only, so ingestion cannot modify the source documents.
 
 ## `config.yaml` Example
 
@@ -39,15 +42,14 @@ sources:
     name: "local_docs"
     enabled: true  # optional, default: true
     config:
-      path: "/data/docs"            # required, path inside the container
+      path: "${DIRECTORY1_PATH}"    # defaults to /data/input
       recursive: true               # optional, default true
-      required_exts: "txt,md,pdf"  # optional, comma-separated extensions
       exclude_hidden: true          # optional, default true
       exclude_empty: false          # optional, default false
-      num_files_limit: 1000         # optional, positive integer
-      schedules: "3600"
-      request_delay: 0              # optional, delay in seconds between files (default: 0)
+      schedules: "${DIRECTORY1_SCHEDULES}"
 ```
+
+Optional fields include `required_exts`, `num_files_limit`, and `request_delay`.
 
 ## Configuration Reference
 
@@ -65,4 +67,20 @@ sources:
 
 ## Multiple Directory Sources
 
-Add more `sources` entries (`directory2`, `directory3`, etc.) with separate volume mounts and paths per source.
+Add another `sources` entry and a separate read-only worker volume for each host
+directory. The connector `path` must exactly match that volume's container path.
+
+## Use a Different Host Directory
+
+For a single source, set `DIRECTORY_HOST_PATH` in `.env` without changing the
+container-side defaults:
+
+```dotenv
+DIRECTORY_HOST_PATH=/path/on/host
+```
+
+Then recreate the worker so Docker applies the new mount:
+
+```bash
+docker compose up -d --force-recreate celery_worker
+```

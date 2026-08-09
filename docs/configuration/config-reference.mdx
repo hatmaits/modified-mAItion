@@ -21,11 +21,30 @@ Environment placeholders like `${VAR_NAME}` resolve at runtime.
 
 ## `sources`
 
+The supplied configuration enables one Directory source by default:
+
+```yaml
+sources:
+  - type: "directory"
+    name: "local_docs"
+    enabled: true
+    config:
+      path: "${DIRECTORY1_PATH}"
+      recursive: true
+      exclude_hidden: true
+      exclude_empty: false
+      schedules: "${DIRECTORY1_SCHEDULES}"
+```
+
+With the example environment and Compose file, the host directory
+`./data/input` is mounted at `/data/input`. S3 and the other remote connectors
+are optional commented examples.
+
 Each item:
 
 ```yaml
-- type: "s3" # or mediawiki / serpapi / etc connector type
-  name: "account1"
+- type: "directory" # or s3 / mediawiki / serpapi / etc.
+  name: "local_docs"
   config:
     # connector-specific fields
 ```
@@ -45,12 +64,12 @@ The following fields are supported by all connector types:
 
 ```yaml
 embedding:
-  provider: local # local | openrouter | openai
+  provider: local # local | ollama | openrouter | openai
   model_config: sentence-transformers/all-mpnet-base-v2
   embedding_dim: 768
 ```
 
-- `provider`: embedding backend
+- `provider`: embedding backend; `local` is the default and needs no API service
 - `model_config`: model id/name used by provider
 - `embedding_dim`: vector dimension returned by model
 
@@ -60,12 +79,20 @@ embedding:
 
 ```yaml
 inference:
-  provider: openrouter # openrouter | openai
-  model_config: openai/gpt-oss-20b:free
+  provider: ollama # ollama | openrouter | openai
+  model_config: "${OLLAMA_DEFAULT_MODEL}"
 ```
 
-- `provider`: inference backend
-- `model_config`: chat/rephrase model id
+- `provider`: inference backend; `ollama` is the default
+- `model_config`: chat/rephrase model ID (`qwen3:4b` in the example environment)
+
+For Ollama, the backend reads `OLLAMA_API_BASE=http://ollama:11434/v1` and
+`OLLAMA_API_KEY=ollama` from `.env.rag`. The key is a compatibility placeholder.
+The `/v1` path is required by the backend's OpenAI-compatible client.
+
+To opt into OpenRouter or another OpenAI-compatible endpoint, change `provider`
+to `openrouter` or `openai` and configure `OPENROUTER_API_BASE` and
+`OPENROUTER_API_KEY` in `.env.rag`.
 
 > NOTE: inference backend is not used for vector search, only for the rephrase endpoint.
 

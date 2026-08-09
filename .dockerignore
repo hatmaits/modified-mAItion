@@ -1,0 +1,5 @@
+**
+!.dockerignore
+!Dockerfile.roat
+!patches/
+!patches/roat-ollama.patch

@@ -8,49 +8,58 @@ keywords:
   - docker
 ---
 
-Upon completion of this Quick Start process you'll have a fully functional mAItion instance running locally
-and configured to use your S3 bucket as a data source.
+This quick start launches a fully local mAItion stack. Docker Compose runs Ollama,
+downloads `qwen3:4b`, and configures it as the default model for both OpenWebUI and
+the RAG backend. Files in `./data/input` are the default knowledge source.
 
 ## Requirements
 
-- Docker and Docker Compose
-- S3 bucket with documents
-- OpenRouter or OpenAI API key
+- Docker with Docker Compose
+- Internet access during the first start to download images and `qwen3:4b`
+- One or more documents to index
+
+No OpenAI or OpenRouter API key is required for the default setup.
 
 ## 1. Prepare Configuration Files
 
-Create `.env.rag` from `.env.rag.example`:
+From the repository root, copy the supplied examples:
 
-- `S3_ACCOUNT1_ENDPOINT`: S3 API endpoint URL (`https://s3.amazonaws.com` for AWS S3)
-- `S3_ACCOUNT1_ACCESS_KEY`: access key ID used to read bucket objects
-- `S3_ACCOUNT1_SECRET_KEY`: secret key paired with the access key
-- `S3_ACCOUNT1_REGION`: bucket region (example: `us-east-1`)
-- `S3_ACCOUNT1_BUCKETS`: one bucket or comma-separated bucket names
-- `S3_ACCOUNT1_SCHEDULES`: ingestion interval in seconds (or comma-separated intervals, default is `3600`)
-- `S3_ACCOUNT1_USE_SSL`: enable TLS for S3 connection (default is `True`)
-- `OPENROUTER_API_KEY`: API key for OpenRouter model calls (optional, only used for rephrase)
+```bash
+cp .env.rag.example .env.rag
+cp .env.openwebui.example .env
+cp config.yaml.example config.yaml
+```
 
-Create `config.yaml` from `config.yaml.example`.
+The examples are ready to run with these defaults:
 
-Default configuration is pre-configured for:
+- Directory source: host `./data/input`, mounted read-only at `/data/input`
+- Local embeddings: `sentence-transformers/all-mpnet-base-v2`
+- Backend inference: Ollama through `http://ollama:11434/v1`
+- OpenWebUI chat: native Ollama through `http://ollama:11434`
+- Default chat and rephrase model: `qwen3:4b`
 
-- single S3 connector
-- `sentence-transformers/all-mpnet-base-v2` for embeddings
-- `openai/gpt-oss-20b:free` for rephrase endpoint (optional, only used for rephrase)
+The local Ollama API key in `.env.rag` is only a compatibility placeholder; Ollama
+does not use it for authentication inside the Compose network.
 
-Create `.env` from `.env.openwebui.example`:
+## 2. Add Documents
 
-- set `OPENAI_API_KEY`
-- optionally set `OPENAI_DEFAULT_MODEL` (default is `openai/gpt-4.1-nano`)
-- optionally change `HTTP_WEB_PORT` (default is `3000`)
+Copy documents into `./data/input`. The worker sees that directory as
+`/data/input` and scans it recursively once per hour by default.
 
-## 2. Start Stack
+To use a different host directory, set `DIRECTORY_HOST_PATH` in `.env`. Keep
+`DIRECTORY1_PATH=/data/input` in `.env.rag` unless you also change the container
+mount target in `compose.yaml`.
+
+## 3. Start the Stack
 
 Run:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
+
+The ROAT services are built locally from `Dockerfile.roat`; no Docker registry
+login is required for a `modified-maition-roat` image.
 
 Wait for all services to become healthy:
 
@@ -58,9 +67,14 @@ Wait for all services to become healthy:
 docker compose ps
 ```
 
-It can take up to ~1 minute on cold start.
+The first start can take several minutes because `ollama-init` downloads
+`qwen3:4b` before the API and OpenWebUI start. Confirm the model is available:
 
-## 3. Login
+```bash
+docker compose exec ollama ollama list
+```
+
+## 4. Log In
 
 Open `http://localhost:3000`.
 
@@ -73,3 +87,15 @@ If unchanged, defaults are:
 
 - username: `admin@example123.com`
 - password: `q1w2e3r4!`
+
+Change these credentials and `WEBUI_SECRET_KEY` before exposing the service to
+other users. The default `WEBUI_BIND_HOST=127.0.0.1` accepts connections only
+from the Docker host; set it to `0.0.0.0` only for a trusted network deployment.
+
+## Optional Remote Providers and Sources
+
+OpenRouter/OpenAI-compatible inference and S3 ingestion remain available, but
+they are disabled in the default examples. See [Frontend environment
+variables](/configuration/frontend-env), [Backend environment
+variables](/configuration/backend-env), and the [S3 connector](/connectors/s3-connector)
+when you want to opt in.
